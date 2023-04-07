@@ -250,6 +250,22 @@ class Dispatcher:
     # CSP idea: Distance to pickup site and wealth ranking with normalized data.
     # add check for zero problem.
 
+    def _normaliser(self, unn_array):
+        maxV = max(unn_array)
+        minV = min(unn_array)
+        norm_array = []
+        if unn_array is None or len(unn_array) == 0:
+            return norm_array
+        if maxV == minV:
+            for i in range(0, len(unn_array), 1):
+                norm_array.append(1)
+            return norm_array
+        else:
+            for i in unn_array:
+                norm_array.append((i - minV) / (maxV - minV))
+        return norm_array
+
+
     def _allocateFare(self, origin, destination, time):
         # a very simple approach here gives taxis at most 5 ticks to respond, which can
         # surely be improved upon.
@@ -260,8 +276,13 @@ class Dispatcher:
 
         if self._parent.simTime - time > 5:
             allocatedTaxi = -1
-            winnerNode = None
             fareNode = self._parent.getNode(origin[0], origin[1])
+            biddingDistances = []
+            biddingRevenues = []
+            biddingTaxis = []
+            norm_biddingDistances = []
+            norm_biddingRevenues = []
+            winningTaxi = 0
             # this does the allocation. There are a LOT of conditions to check, namely:
             # 1) that the fare is asking for transport from a valid location;
             # 2) that the bidding taxi is in the dispatcher's list of taxis
@@ -269,27 +290,31 @@ class Dispatcher:
             # 4) that at least one valid taxi has actually bid on the fare
             if fareNode is not None:
                 for taxiIdx in self._fareBoard[origin][destination][time].bidders:
+                    # Check that the taxi is not a psycho, e.g. does not have a revenue value of 0.
                     if len(self._taxis) > taxiIdx and self._taxis[taxiIdx].revenue() != 0:
                         bidderLoc = self._taxis[taxiIdx].currentLocation
                         bidderNode = self._parent.getNode(bidderLoc[0], bidderLoc[1])
                         if bidderNode is not None:
-                            # ultimately the naive algorithm chosen is which taxi is the closest.
-                            # This is patently unfair for several
-                            # reasons, but does produce *a* winner.
+                            biddingDistances.append(self._parent.distance2Node(bidderNode, fareNode))
+                            biddingRevenues.append(self._taxis[taxiIdx].revenue())
+                            biddingTaxis.append(taxiIdx)
+                # Normalizing
+                norm_biddingDistances = self._normaliser(biddingDistances)
+                norm_biddingRevenues = self._normaliser(biddingRevenues)
+                # Set Initial biggestScore value
+                biggestScore = 0
 
-                            # NORMALIZE THEN COMPARE HERE
+                for x in range(0, (len(norm_biddingDistances)), 1):
+                    print(norm_biddingDistances)
+                    print(norm_biddingRevenues)
+                    totalScore = norm_biddingDistances[x] + norm_biddingRevenues[x]
+                    if totalScore > biggestScore:
+                        biggestScore = totalScore
+                        allocatedTaxi = biddingTaxis[x]
+                if allocatedTaxi >= 0:
+                    # but if so, allocate the taxi.
+                    self._fareBoard[origin][destination][time].taxi = allocatedTaxi
+                    self._parent.allocateFare(origin, self._taxis[allocatedTaxi])
 
-                            if winnerNode is None or self._parent.distance2Node(bidderNode,
-                                                                                fareNode) < self._parent.distance2Node(
-                                    winnerNode, fareNode):
-                                allocatedTaxi = taxiIdx
-                                winnerNode = bidderNode
-                            else:
-                                # and after all that, we still have to check that somebody won,
-                                # because any of the other reasons to invalidate
-                                # the auction may have occurred.
-                                # taxi with performance metric of 0 is psycho uber
-                                if allocatedTaxi >= 0:
-                                    # but if so, allocate the taxi.
-                                    self._fareBoard[origin][destination][time].taxi = allocatedTaxi
-                                    self._parent.allocateFare(origin, self._taxis[allocatedTaxi])
+
+
